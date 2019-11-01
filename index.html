@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Conway Shader</title>
+
+    <meta name="viewport" content="width=device-width">
+
+    <link rel="stylesheet" type="text/css" href="main.css">
+
+    <script type="text/javascript" src="GlBoilerplate.js"></script>
+    <script type="text/javascript" src="main.js"></script>
+    <script id="2d-vertex-shader" type="x-shader/x-vertex">
+        // Vertex shader
+        attribute vec2 a_position;
+
+        uniform float u_flipY;
+
+        attribute vec2 a_texCoord;
+        varying vec2 v_texCoord;
+
+        void main() {
+           gl_Position = vec4(a_position.x, u_flipY*a_position.y, 0, 1);
+           v_texCoord = a_texCoord;
+        }
+    </script>
+
+    <script id="2d-fragment-shader" type="x-shader/x-fragment">
+        // Fragment shader
+        precision highp float;
+
+        uniform sampler2D u_image;//texture array
+
+        varying vec2 v_texCoord;
+        uniform vec2 u_textureSize;
+
+        uniform vec2 u_mouseCoord;
+
+        #define PI 3.14159265358979323846264
+
+        // SmoothLifeL
+        // #define ALPHA_N 0.028
+        // #define ALPHA_M 0.147
+        // #define BIRTH_LO 0.287
+        // #define BIRTH_HI 0.37
+        // #define DEATH_LO 0.335
+        // #define DEATH_HI 0.549
+
+        // regl
+        #define ALPHA_N 0.03
+        #define ALPHA_M 0.15
+        #define BIRTH_LO 0.27
+        #define BIRTH_HI 0.34
+        #define DEATH_LO 0.52
+        #define DEATH_HI 0.75
+
+        // SmoothLifeL
+        // #define ALPHA_N 0.028
+        // #define ALPHA_M 0.147
+        // #define BIRTH_LO 0.257
+        // #define BIRTH_HI 0.336
+        // #define DEATH_LO 0.365
+        // #define DEATH_HI 0.549
+
+        // Rafler's
+        // #define ALPHA_N 0.028
+        // #define ALPHA_M 0.147
+        // #define BIRTH_LO 0.278
+        // #define BIRTH_HI 0.365
+        // #define DEATH_LO 0.267
+        // #define DEATH_HI 0.445
+        
+        float sigma1(float x, float a, float alpha) {
+            return 1.0 / (1.0 + exp(-4.0*(x-a)/alpha));
+        }
+        float f(vec2 p) {
+            vec2 coord = v_texCoord+(p/u_textureSize);
+            if (coord.x > 1.0) coord.x--;
+            if (coord.x < 0.0) coord.x++;
+            if (coord.y > 1.0) coord.y--;
+            if (coord.y < 0.0) coord.y++;
+            return texture2D(u_image, coord).g;
+        }
+        float sigma_n(float x, float a, float b) {
+            return sigma1(x, a, ALPHA_N) * (1.0 - sigma1(x, b, ALPHA_N));
+        }
+        float sigma_m(float x, float y, float m) {
+            float w = sigma1(m, 0.5, ALPHA_M);
+            return x*(1.0-w)+y*w;
+        }
+        float S(float n, float m) {
+            return sigma_n(n,
+                sigma_m(BIRTH_LO, DEATH_LO, m),
+                sigma_m(BIRTH_HI, DEATH_HI, m));
+        }
+        float weight(float r, float cutoff) {
+            return 1.0 - sigma1(r, cutoff, 0.5);
+        }
+
+        void main() {
+
+            vec2 onePixel = vec2(1.0, 1.0)/u_textureSize;
+
+            vec2 pxDistFromMouse = (v_texCoord - u_mouseCoord)*(v_texCoord - u_mouseCoord)/onePixel/onePixel;
+
+            float tol = 5.;
+            if (pxDistFromMouse.x < tol && pxDistFromMouse.y < tol){
+                gl_FragColor =  vec4(1,1,1,1);
+                return;
+            }
+
+            vec4 rawTextureData = texture2D(u_image, v_texCoord);
+
+            // Iterate through neighbors
+            const int ri = 3;
+            const int ro = 9;
+            float b = 1.0;
+            float m = 0.0;
+            float n = 0.0;
+
+            float r1 = 0.0, r2 = 0.0, w1 = 0.0, w2 = 0.0;
+
+            for (int i=-ro; i<=ro; i++){
+              for (int j=-ro; j<=ro; j++){
+                float r2 = float(i*i + j*j);
+                float r = sqrt(r2);
+                float i_interp = (float(ri) + b / 2.0 - r) / b;
+                float a_interp = (float(ro) + b / 2.0 - r) / b;
+                
+                float value = 0.0;
+                if (a_interp > 0.0) value = f(vec2(i,j));
+                if (i_interp > 1.0) m += value;
+                else if (i_interp > 0.0) m += value * ((float(ri) + b / 2.0 - r) / b);
+
+                if (i_interp < 1.0) {
+                    if (1.0 - i_interp < 1.0) n += value * (1.0 - (float(ri) + b / 2.0 - r) / b);
+                    else if (a_interp > 1.0) n += value;
+                    else if (a_interp > 0.0) n += value * ((float(ro) + b / 2.0 - r) / b);
+                }
+
+                /*float s = f(vec2(i,j));
+                float r = float(i*i + j*j);
+
+                float wi = weight(r, float(ri*ri));
+                r1 += s * wi;
+                w1 += wi; // normalization
+
+                float wo = weight(r, float(ro*ro));
+                r2 += s * wo;
+                w2 += wo; // normalization
+                */
+              }
+            }
+
+            // float m = r1 / w1;
+            // float n = (r2 - r1) / (w2 - w1);
+
+            float M = PI * float(ri*ri);
+            float N = PI * float(ro*ro - ri*ri);
+            m = m / M;
+            n = n / N;
+
+            float prev = f(vec2(0.,0.));
+            // float next = S(n,m);
+            float next = prev + 0.09 * (S(n,m) - prev);
+            // float next = prev + 0.12 * (2.0 * clamp(S(n,m),0.,1.) - 1.0);
+
+            gl_FragColor = vec4(clamp(next, 0.0, 0.9), clamp(next, 0.0, 1.0), clamp(next, 0.0, 0.4), 1);
+        }
+    </script>
+</head>
+<body>
+
+<canvas id="glcanvas"></canvas>
+
+</body>
+</html>
